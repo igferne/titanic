@@ -1,2 +1,1 @@
-# titanic
-Tipología de datos - PRA2
+Este repositorio contiene los documentos relevantes para la entrega de la práctica 2 de la asignatura Tipología y Ciclo de Vida de los Datos del máster en Ciencia de datos de la UOC. Para más información revisar la wiki.
