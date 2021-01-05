@@ -1,0 +1,565 @@
+---
+title: "Tipología de Datos - PRA2"
+author: "Ignacio Fernandez Estebanez"
+date: "1/5/2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Descripción del dataset. ¿Por qué es importante y qué pregunta/problema pretende responder?
+Este documento da respuesta a la práctica 2 de la asignatura *Tipología y Ciclo de Vida de los Datos*. A lo largo de la práctica, se desea afrontar el reto mencionado en el enunciado entre las posibilidades de selección de datasets, de la competición de Kaggle sobre la predicción de los supervivientes del Titanic.
+https://www.kaggle.com/c/titanic/overview
+
+El problema se enuncia de la siguiente manera: se dispone de un dataset con información de los pasajeros del Titanic dividido en 2 archivos: uno para training y otro para test. Se desea construir un modelo que prediga la supervivencia del pasajero.
+
+A lo largo de este documento, se abordarán las preguntas planteadas en el enunciado de la práctica, para realizar el análisis del dataset.
+
+De acuerdo  con la información del reto, se dispone de la siguiente descripción de los datos: https://www.kaggle.com/c/titanic/data
+
+<ul>
+<li> **PassengerId**: Id del pasajero.</li>
+<li> **Survived**: booleano. Si el pasajero sobrevivió al naufragio.</li>
+<li> **Pclass**: Clase del billete del pasajero. </li>
+<li> **Sex**: Sexo del pasajero.</li>
+<li> **Age**: Edad del pasajero.</li>
+<li> **SibSp**: Número de hermanas y hermanos o conyuges a bordo del barco.</li>
+<li> **Parch**: Número de padres/ hijos a bordo del barco.</li>
+<li> **Ticket**: Ticket number.</li>
+<li> **Fare**: Tarifa.</li>
+<li> **Cabin**: Número de cabina.</li>
+<li> **Embarked**: Puerto de embarco.</li>
+</ul>
+
+## Integración y selección de los datos de interés a analizar
+El primer paso es cargar el dataset para poder trabajar con los datos y comprobar la descripción que se proporciona. Para ello, se carga el archivo de training descargado previamente de Kaggle.
+
+```{r}
+library(readr)
+training <- read.csv("~/Downloads/titanic/train.csv", sep = ",")
+head(training)
+```
+
+Se aprecia que en efecto los datos que se disponen coinciden con la descripción de Kaggle. Se dispone de información acerca de 891 pasajeros (más los que estén en la lista de test para validar la predicción). Además se dispone también del nombre del pasajero, aunque no aporta mucho valor estadístico para que problema que se aborda. 
+
+A continuación, vamos a analizar los tipos de datos disponibles en el dataset:
+
+```{r}
+str(training)
+```
+
+De acuerdo con la descripción de los datos del enunciado, vamos a realizar algunas transformaciones para facilitar el uso de los datos:
+
+```{r}
+# Set Survived as factor
+training$Survived <- as.factor(training$Survived)
+
+# Set Class as factor
+training$Pclass <- as.factor(training$Pclass)
+
+# Set Sex as factor
+training$Sex <- as.factor(training$Sex)
+
+# Set Embarked as factor
+training$Embarked[training$Embarked=='C'] <- 'Cherbourg'
+training$Embarked[training$Embarked=='Q'] <- 'Queenstown'
+training$Embarked[training$Embarked=='S'] <- 'Southampton'
+training$Embarked <- as.factor(training$Embarked)
+
+str(training)
+```
+
+Finalmente, vamos a eliminar del dataset las columnas de *Name* y *Ticket* que a priori, no deberían ser relevantes para un análisis estadístico:
+
+```{r}
+training <- subset(training, select = - `Name`)
+training <- subset(training, select = - `Ticket`)
+
+head(training)
+```
+Una vez hemos seleccionado y adaptado los datos con los que queremos trabajar, ya podemos pasar al punto de limpieza de datos.
+
+
+## Limpieza de los datos.
+
+### ¿Los datos contienen ceros o elementos vacíos? ¿Cómo gestionarías cada uno de estos casos?
+
+A continuación vamos a realizar la limpieza de los datos. En primer lugar, vamos a comprobar qué atributos disponen de valores nulos:
+
+```{r}
+summary(training)
+```
+
+Aparentemente se disponen de valores nulos en los siguientes campos:
+<ul>
+<li>- **Age**: hay 177 pasajeros de los que desconocemos su edad.</li>
+<li>- **Embarked**: hay 2 pasajeros de los que no se dispone información sobre el puerto de embarque.</li>
+</ul>
+
+Adicionalmente, vamos a comprobar en detalle los valores de cabin:
+
+```{r}
+table(training$Cabin)
+```
+
+Vemos que hay 687 pasajeros de los que no se dispone de información sobre la cabina.
+
+#### Embarked
+A los pasajeros que se desconoce su puerto de embarque, se les va a asignar el puerto con mayor afluencia. Si revisamos los pasajeros embarcados en cada puerto:
+
+```{r}
+library(factoextra)
+ggplot(data=training, aes(x=Embarked,fill=Survived))+geom_bar()
+```
+
+Vemos que el puerto con más afluencia fue el de Southampton. Ese será el que imputaremos a estos viajeros:
+
+```{r}
+# Set empty Embarked to Southampton.
+training$Embarked[training$Embarked==""] <- "Southampton"
+
+table(training$Embarked)
+```
+
+#### Age
+Para el caso de los datos que no se disponen sobre la edad, vamos a hacer una imputación de la mediana de la edad en función del grupo al que pertenezcan por clase y sexo. 
+
+```{r}
+ages <- filter(training, !is.na(training$Age))
+
+# Due to issues with knit, I split the calculation and manually place the median for the imputation
+#median_1_male <- median(ages$Age[ages$Pclass==1 & ages$Sex=="male"])
+#median_2_male<- median(ages$Age[ages$Pclass==2 & ages$Sex=="male"])
+#median_3_male <- median(ages$Age[ages$Pclass==3 & ages$Sex=="male"])
+#median_1_female <- median(ages$Age[ages$Pclass==1 & ages$Sex=="female"])
+#median_2_female <- median(ages$Age[ages$Pclass==2 & ages$Sex=="female"])
+#median_3_female <- median(ages$Age[ages$Pclass==3 & ages$Sex=="female"])
+
+training$Age[is.na(training$Age) & training$Pclass==1 & training$Sex=="male"] <- 40
+training$Age[is.na(training$Age) & training$Pclass==2 & training$Sex=="male"] <- 30
+training$Age[is.na(training$Age) & training$Pclass==3 & training$Sex=="male"] <- 25
+training$Age[is.na(training$Age) & training$Pclass==1 & training$Sex=="female"] <- 35
+training$Age[is.na(training$Age) & training$Pclass==2 & training$Sex=="female"] <- 28
+training$Age[is.na(training$Age) & training$Pclass==3 & training$Sex=="female"] <- 21.5
+
+summary(training$Age)
+```
+
+#### Cabin
+En el caso de los datos de la cabina, hay demasiados valores ausentes. Son 687 sobre 891 observaciones, por lo que realizar una imputación nos podría conducir a demasiado error. En este caso dejaremos el atributo como está y **no lo consideraremos en el dataset**. 
+
+```{r}
+library(dplyr)
+training <- select(training, x=-Cabin)
+```
+
+
+
+### Identificación y tratamiento de valores extremos
+A continuación vamos a hacer un análisis de outliers en los datos que se disponen. Los outliers son valores que toman los datos que se salen significativamente del rango de la distribución. Este análisis se aplica a los valores numéricos. Podemos analizarlo de diferentes formas, pero una de las más comunes es el análisis en boxplot donde además se visualizan fácilmente los outliers de forma gráfica.
+
+En el dataset se disponen de los siguientes datos numéricos:
+<ul>
+<li> PassengerId</li>
+<li> Age</li>
+<li> SibSp</li>
+<li> Parch</li>
+<li> Fare</li>
+</ul>
+
+En el caso de PassengerId, no nos interesan los outliers porque no es más que el identificador del pasajero. Analicemos el resto de datos. Empezamos por Age:
+
+```{r}
+boxplot(training$Age)
+boxplot.stats(training$Age)
+```
+
+Vemos que el box plot marca el valor máximo que considera dentro del rango en 57. Este valor se corresponde al tercer cuartil más 1.5 veces el IQR. A partir de este valor, considera los valores outliers. 
+
+Vemos que hay 24 pasajeros con edades comprendidas entre 58 y 80 que se consideran outliers desde el punto de vista estadístico. Sin embargo, en 1912 era perfectamente plausible que hubiera en el barco personas en este rango de edad. Por lo tanto, *no se va a hacer ninguna imputación de los outliers*. No obstante, no se considerarán estos valores atípicos a la hora de obtener medidas estadísticas de tendencia central y desviación, para que no ofrezcan una visión errónea de la distribución. Sino que utilizaremos otras alternativas como, por ejemplo, la media recortada.
+
+A continuación analizamos los valores de SibSp y Parch:
+
+```{r}
+par(mfrow=c(1,2))
+boxplot(training$SibSp)
+boxplot.stats(training$SibSp)
+boxplot(training$Parch)
+```
+
+En el caso de SibSp, vemos que lo normal es que los pasajeros viajaran con entre 0 y 2 acompañantes de tipo hermano/hermana esposo/esposa. Vemos que hay algunos casos con 3, 4, 5 y 8 acompañantes de este tipo. Aunque sea raro si que es posible, por lo que igual que en el caso anterior, no ejecutaremos ninguna imputación en estos casos, pero sí que lo consideraremos de cara al cálculo de medidas de tendencia central.
+
+Finalmente, analizamos la variable Fare:
+
+```{r}
+boxplot(training$Fare)
+
+# Store the first outlier
+boxplot <- boxplot.stats(training$Fare)
+limitFare <- min(boxplot$out)
+```
+
+Se aprecia que el precio de los billetes se mueve en un rango entre 8 y 31 (supongo que libras o dólares). Sin embargo, hay billetes que ascienden hasta los 500.
+
+En este caso sí que se va a aplicar una imputación de valor sobre los outliers. Lo que se va a hacer es aplicar en cada caso la mediana del precio del billete para cada clase.
+
+```{r}
+training$Fare[training$Pclass==1 & training$Fare>=limitFare] <- median(training$Fare[training$Pclass==1]) 
+training$Fare[training$Pclass==2 & training$Fare>=limitFare] <- median(training$Fare[training$Pclass==2])
+training$Fare[training$Pclass==3 & training$Fare>=limitFare] <- median(training$Fare[training$Pclass==3])
+
+boxplot(training$Fare)
+```
+
+
+## Análisis de los datos.
+
+### Selección de los grupos de datos que se quieren analizar/comparar (planificación de los análisis a aplicar).
+En primer lugar, se seleccionan los datos que se quieren analizar/comparar. En este ejercicio, el objetivo es conseguir un modelo que sea capaz de predecir si un pasajero a bordo del Titanic sobrevive al naufragio o no. Por lo tanto, la división principal que se hace del dataset es en dos clases definidas por el atributo *Survived*.
+
+Para obtener este modelo, se van a analizar los siguientes pasos:
+<ul>
+<li> Comprobación de la normalidad y homogeneidad de los datos.</li>
+<li> Análisis estadístico para comparar los grupos de datos.</li>
+</ul>
+
+### Comprobación de la normalidad y homogeneidad de la varianza
+Tenemos dos tipos de variables en el dataset, las categóricas, donde se englobal Survided, Pclass, Sex y Embarked; y las continuas, donde se encuentran Age, SibSp, Parch y Fare. 
+
+La comprobación de la normalidad es necesaria para poder hacer análisis posteriores como por ejemplo el contraste de hipótesis. Para las variables contínuas puede hacerse con las pruebas de Kolmogorov-Smirnov y de Shapiro-Wilk. El método de Shapiro-Wilk se considera más robusto, por lo que será el que utilizaremos. 
+
+**Age**
+
+```{r}
+# Convert to numeric for the Shapiro test
+shapiro.test(training$Age[training$Survived==0])
+shapiro.test(training$Age[training$Survived==1])
+
+# Plot data
+ggplot(data = training, aes(x = Survived, y = Age, colour = Survived)) +
+  geom_boxplot() +
+  geom_point() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# Validate with Kolmogorov-Smirnov
+ks.test(training$Age[training$Survived==1], pnorm, mean(training$Age[training$Survived==1]), sd(training$Age[training$Survived==1]))
+ks.test(training$Age[training$Survived==0], pnorm, mean(training$Age[training$Survived==0]), sd(training$Age[training$Survived==0]))
+```
+Se concluye por la dos pruebas que la distribución no es normal, dado que el nivel de significancia p está muy por debajo de 0.05. La prueba de Kolmogorov-Smirnov confirma los resultados de la distribución, aunque en este caso el grupo de supervivientes sí que seguiría una distribución normal en cuanto a la edad. 
+
+Si nos fijamos en la comparativa de boxplot, vemos que los rangos de edad en ambos grupos son muy parecidos, aunque en el caso de los supervivientes, la mediana queda ligeramente por encima.
+
+Finalmente, vamos a comprobar la homogeneidad de la varianza para los dos grupos. En este caso, debido a la falta de normalidad, se elige aplicar el test de Barlett, que es menos sensible a esta falta (fuente: https://rpubs.com/Joaquin_AR/218466).
+
+```{r}
+bartlett.test(list(training$Age[training$Survived==0],training$Age[training$Survived==1]))
+```
+El nivel de significancia p-value nos sale superior a 0.05, por lo que aceptamos que la hipótesis de que **ambas poblaciones tienen varianzas semejantes** es correcta, como confirma el boxplot anterior.
+
+
+**SibSp**
+
+```{r}
+# Convert to numeric for the Shapiro test
+shapiro.test(training$SibSp[training$Survived==0])
+shapiro.test(training$SibSp[training$Survived==1])
+
+# Plot data
+ggplot(data = training, aes(x = Survived, y = SibSp, colour = Survived)) +
+  geom_boxplot() +
+  geom_point() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# Validate with Kolmogorov-Smirnov
+ks.test(training$SibSp[training$Survived==1], pnorm, mean(training$SibSp[training$Survived==1]), sd(training$SibSp[training$Survived==1]))
+ks.test(training$SibSp[training$Survived==0], pnorm, mean(training$SibSp[training$Survived==0]), sd(training$SibSp[training$Survived==0]))
+```
+Nuevamente, obtenemos valores de significancia muy inferiores a 0.05, por lo que la interpretación es que la distribución no es normal. Aplicamos nuevamente Barrett para la prueba de homogeneidad de la varianza:
+
+```{r}
+bartlett.test(list(training$SibSp[training$Survived==0],training$SibSp[training$Survived==1]))
+```
+En este caso, obtenemos un nivel de significancia muy por debajo de 0.05, por lo que no se puede afirmar que ambos grupos tengan varianzas semejantes.
+
+**Parch**
+
+```{r}
+# Convert to numeric for the Shapiro test
+shapiro.test(training$Parch[training$Survived==0])
+shapiro.test(training$Parch[training$Survived==1])
+
+# Plot data
+ggplot(data = training, aes(x = Survived, y = Parch, colour = Survived)) +
+  geom_boxplot() +
+  geom_point() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# Validate with Kolmogorov-Smirnov
+ks.test(training$Parch[training$Survived==1], pnorm, mean(training$Parch[training$Survived==1]), sd(training$Parch[training$Survived==1]))
+ks.test(training$Parch[training$Survived==0], pnorm, mean(training$Parch[training$Survived==0]), sd(training$Parch[training$Survived==0]))
+```
+De nuevo, obtenemos niveles de significancia muy por debajo del nivel para aceptar la hipótesis, por lo que la distribución no es normal. En este caso, se aprecia una diferencia significativa además en el boxplot de ambos grupos. Se aprecia, que la distribución entre los participantes en el grupo que se salvó, oscila entre 0-1, mientras que en el grupo de los que falleció se sitúa en el cero. Esto daría sentido a la premisa de que salvaron tantos niños y niñas como pudieron, y por ello, la cantidad de progenitores o hijos a bordo entre los pasajeros que se salvaron sería superior a uno.
+
+Aplicamos nuevamente la comprobación de Barret:
+
+```{r}
+bartlett.test(list(training$Parch[training$Survived==0],training$Parch[training$Survived==1]))
+```
+El coeficiente de significancia es mayor que 1, por lo que se puede asumir homogeneidad en las varianzas. Esto podría parecer contradictorio con los gráficos obtenidos, sin embargo, no lo es tanto. Se aprecia que en ambos casos la mayoría de la muestra se sitúa en cero. Si bien es cierto que que entre los supervivientes hay una muestra representativa en el 1, también la distribución de los 0 toma valores más altos, por lo que en conjunto queda compensado.
+
+**Fare**
+
+```{r}
+# Convert to numeric for the Shapiro test
+shapiro.test(training$Fare[training$Survived==0])
+shapiro.test(training$Fare[training$Survived==1])
+
+# Plot data
+ggplot(data = training, aes(x = Survived, y = Fare, colour = Survived)) +
+  geom_boxplot() +
+  geom_point() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# Validate with Kolmogorov-Smirnov
+ks.test(training$Fare[training$Survived==1], pnorm, mean(training$Fare[training$Survived==1]), sd(training$Fare[training$Survived==1]))
+ks.test(training$Fare[training$Survived==0], pnorm, mean(training$Fare[training$Survived==0]), sd(training$Fare[training$Survived==0]))
+```
+Nuevamente, podemos afirmar que la distribución no es normal, debido al bajísimo p-value obtenido. Si nos fijamos en el gráfico, vemos que en este caso además hay diferencias muy significativas entre el precio del billete de los pasajeros que se salvaron y los que no. Esto daría sentido a la hipótesis de que se salvaron los pasajeros de las clases más altas y que por lo tanto, habían pagado más dinero por su pasaje.
+
+```{r}
+bartlett.test(list(training$Fare[training$Survived==0],training$Fare[training$Survived==1]))
+```
+
+De la aplicación de Barrett, se aprecia que en este caso tampoco se cumple la condición de homogeneidad de la varianza. Todas estas desigualdades entre grupos, tendremos que considerarlas en los siguientes puntos a la hora de hacer comparaciones.
+
+
+#### Variables categóricas
+A continuación, revisamos la representación de las variables catgóricas, que nos servirían para hacer clasificaciones adicionales sobre los grupos que disponemos, creando nuevos grupos de mayor granularidad.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Plot sex
+ggplot(data=training, aes(x=Sex, fill=Survived))+geom_bar()
+
+# Plot Pclass
+ggplot(data=training, aes(x=Pclass, fill=Survived))+geom_bar()
+
+# Plot Embarked
+ggplot(data=training, aes(x=Embarked, fill=Survived))+geom_bar()
+```
+Podemos sacar las siguientes conclusiones:
+</li>
+</li> Hay casi el doble de hombres que de mujeres en el dataset.</li>
+</li> La mitad de la tripulación del Titanic viajaban en 3 clase.</li>
+</li> Casi dos tercios del pasaje embarcaron en Southampton.</li>
+</li>
+
+Además, se pueden extraer algunas conclusiones de la relación entre las variables categóricas y la variable analizada Survived:
+<ul>
+<li> Casi el 70% de las mujeres que iban en el Titanic sobrevivieron, un porcentaje muy superior al de los hombres.</li>
+<li> La proporción de supervivientes de pasajeros de las clases 1 y 2 es muy superior a la de 3.</li>
+<li> La proporción de supervivientes que embarcaron en Cherbourg es superior a la de Southampton o Queenstown.</li>
+</ul>
+
+Vamos a analizar en detalle el caso de Cherbourg:
+
+```{r}
+ggplot(data=training, aes(x=Sex, fill=Pclass))+geom_bar(position = "Fill")+facet_wrap(~Embarked)
+ggplot(data=training, aes(x=Embarked, fill=Sex))+geom_bar(position = "Fill")
+```
+Si analizamos el pasaje por puerto, vemos que en Cherbourg hay un porcentaje superior al 50% de pasajeros de 1ª clase, lo que podría ser un motivo de la alta tasa de supervivencia, además vemos que el porcentaje de mujeres es alto, en torno al 45% de los pasajeros embarcados que es superior al % de mujeres totales en el barco. Además casi el 60% de esas mujeres pertenecían a la clase 1.
+
+```{r}
+ggplot(data=filter(training, Embarked=="Cherbourg"), aes(x=Sex, fill=Survived))+geom_bar()+facet_wrap(~Pclass)
+```
+
+###Aplicación de pruebas estadísticas para comparar los grupos de datos. En función de los datos y el objetivo del estudio, aplicar pruebas de contraste de hipótesis, correlaciones, regresiones, etc. Aplicar al menos tres métodos de análisis diferentes
+
+#### Comparación de grupos
+Al no cumplirse las medidas de homogeneidad de la varianza y la normalidad, no es posible aplicar modelos de contraste de hipótesis de tipo paramétrico, como el método t-Student, sino que tendremos que ir a métodos no paramétricos. 
+
+En este apartado, vamos a tratar de comprobar las diferencias que se han podido apreciar del análisis gráfico en los puntos anteriores, entre las variables que parecen más interesantes para el modelo:
+Cuantitativas:
+<ul>
+<li> Fare</li>
+<li> Parch</li>
+<li> SibSp</li>
+</ul>
+
+Cualitativas:
+<ul>
+<li> Sex</li>
+<li> Pclass</li>
+</ul>
+
+Descartamos por lo tanto el puerto de embarque, ya que hemos visto que podría tener más relación con la clase y el sexo de los pasajeros, que por el puerto como tal.
+
+Para las variables cuantitativas se aplica el test de Mann-Whitney o el de Wilcoxon, que se aplican ambas de la siguiente forma:
+
+```{r}
+# Fare
+wilcox.test(Fare ~ Survived, data = training)
+
+# Parch
+wilcox.test(Parch ~ Survived, data = training)
+
+# SibSp
+wilcox.test(SibSp ~ Survived, data = training)
+```
+Se aprecia que las variables Fare y Parch están, como se presuponía, significativamente diferenciadas en ambos grupos, con valores de significancia muy por debajo del 0.05. En el caso de SibSp, también hay diferencias, sin embargo de un orden mucho menor, por lo que esta variable tendría menos influencia en la determinación de la supervivencia.
+
+#### Regresión
+
+La regresión es un modelo matemático que permite encontrar una relación de dependencia entre una variable dependiente y una o más variables independientes. En este caso, vamos a hacer una prueba para ver la relación que existe entre las variables numéricas:
+
+```{r}
+training_num <- select(training, x=c(Age, SibSp, Parch, Fare))
+colnames(training_num) <- c("Age", "SibSp", "Pach", "Fare")
+plot(training_num)
+```
+
+En los gráficos anteriores podemos ver las cuatro características numéricas que disponemos pintadas una frente a otra. Aunque no se aprecia ningún caso de relaciones lineales, de los gráficos sí que se puede extraer una conclusión: **Conforme aumenta la edad (Age) disminuye el número de SibSp**. Esto tiene sentido porque con 80 años es más complicado que viajen en el barco con 4,5 o 6 hermanas y hermanos o conyuges.
+
+
+Podemos también utilizar las variables categóricas para crear un modelo de regresión capaz de predecir una variable dicotómica, como es el caso de Survived. Esto lo podemos implementar con un modelo de regresión logística:
+
+```{r}
+# Model creation
+model_glm <- glm(Survived ~ Pclass+Sex, data=training, family="binomial")
+summary(model_glm)
+
+# Trusted intervals
+confint(model_glm)
+```
+
+Del resumen del modelo vemos que nos da errores relativamente altos, del orden del 20%. Salvo la variable Pclass con valor 2, todas las demás ofrecen valores de significancia muy bajos. Incluso, Pclass2, ofrece un valor muy por debajo del 0.05. Lo que en este caso nos indica que el nivel de significancia está por encima del 95% y por lo tanto las variables del modelo de regresión serían buenas predictoras de la supervivencia con un error en torno al 20%.
+
+
+#### Correlación
+
+Podemos buscar correlación entre las variables numéricas del dataset. Para ello dado que no se cumplen los criterios de homogeneidad de la varianza y normalidad, utilizaremos el coeficiente de Spearman, que responde mejor a este tipo de poblaciones.
+
+A continuación, buscamos correlaciones entre todos los pares de variables numéricas, utilizando el método de R cor.test() y especificando el método de Spearman:
+
+```{r}
+cor.test(training$Age,training$SibSp, method="spearman")
+cor.test(training$Age,training$Parch, method="spearman")
+cor.test(training$Age,training$Fare, method="spearman")
+
+cor.test(training$Parch,training$SibSp, method="spearman")
+cor.test(training$Parch,training$Fare, method="spearman")
+
+cor.test(training$SibSp,training$Fare, method="spearman")
+```
+
+El test de correlación devuelve un resultado entre [-1, 1] donde los extremos indican una alta correlación y el 0 una correlación nula. En el cruce entre las variables anteirores, vemos que en todos los casos nos da valores muy cercanos al cero, por lo que **no existe ninguna correlación entre estas variables**. 
+
+
+#### Aprendizaje Supervisado
+Hasta este momento, se han obtenido algunas conclusiones propias del análisis de los datos siguiendo una metodología estadística y tratando de encontrar hipótesis.
+
+Otra alternativa para resolver el ejercicio sería aplicar aprendizaje supervisado, es decir, dejar que un modelo de minería de datos analice el dataset y encuentre una serie de reglas, que podemos comparar con las reglas estadísticas que hemos hayado, para la predicción de la supervivencia.
+
+En este caso, aplicaríamos aprendizaje supervisado porque ya disponemos de un dataset con los dos grupos de interés clasificados, si sobrevive o no, por lo que nos interesa que un modelo sea capaz de predecir la pertenencia a uno de estos grupos. Para ello, utilizaremos un árbol de decisión:
+
+Para la creación del árbol, nos vamos a quedar solamente con los siguientes atributos: Pclass, Sex, Age, Parch y Sib. Como necesitamos que las variables sean categóricas, vamos a hacer una discretización previa de las variables numéricas: 
+
+```{r}
+# Discretize age
+training['ageRange'] <- NaN
+training$ageRange[training$Age<=16] <- "Nino"
+training$ageRange[training$Age>16] <- "Adulto"
+training['ageRange'] <- as.factor(training$ageRange)
+
+# Discretize Parch
+training['parchRange'] <- NaN
+training$parchRange[training$Parch==0] <- 0
+training$parchRange[training$Parch>0] <- 1
+training['parchRange'] <- as.factor(training$parchRange)
+
+# Discretize SibSp
+training['sibSpRange'] <- NaN
+training$sibSpRange[training$SibSp==0] <- 0
+training$sibSpRange[training$SibSp>0] <- 1
+training['sibSpRange'] <- as.factor(training$sibSpRange)
+```
+
+Una vez hemos preparado los datos, procedemos a crear los datasets de training y test y a crear el modelo:
+
+```{r}
+training_dt <- select(training, x=c(Survived, Pclass, Sex, ageRange, parchRange, sibSpRange))
+colnames(training_dt) <- c("Survived", "Pclass", "Sex", "ageRange", "parchRange", "sibSpRange")
+
+# Divide between test and training
+train_dt <- training_dt[1:600,]
+test_dt <- training_dt[600:891,]
+
+# Divide training and test
+train_x <- train_dt[,2:6]
+train_y <- train_dt[,1]
+test_x <- test_dt[,2:6]
+test_y <- test_dt[,1]
+
+# Build model
+model <- C50::C5.0(train_x, train_y,rules=TRUE )
+summary(model)
+
+```
+
+El árbol es capaz de crear 4 reglas para hacer la clasificación, principalmente utilizando los atributos Sexo, Rango de edad y la clase. Las reglas son las que podemos ver en el resultado del modelo.
+
+Con estas reglas, probamos a clasificar el dataset de test que hemos guardado. Obtenemos un éxito del 78% de precisión.
+
+```{r}
+predicted_model <- predict( model, test_x, type="class" )
+print(sprintf("La precisión del árbol es: %.4f %%",100*sum(predicted_model == test_y) / length(predicted_model)))
+```
+
+
+## Representación de los resultados a partir de tablas y gráficas.
+Todos los resultados obtenidos se han ido presentando en cada uno de los apartados como conclusión parcial.
+
+## Resolución del problema. A partir de los resultados obtenidos, ¿cuáles son las conclusiones? ¿Los resultados permiten responder al problema?
+En este análisis se ha analizado el dataset de pasajeros del Titanic con el objetivo de encontrar variables predictoras de la supervivencia. El problema se ha abordado desde dos puntos de vista: el problema estadístico, con análisis de regresión, correlación y contrastes de hipótesis, y el de la minería de datos, construyendo un árbol de decisión. Vamos a ver las conclusiones en cada caso:
+
+**Análisis estadístico**
+El análisis hecho con herramientas estadísticas nos ha arrojado las siguientes conclusiones:
+<ul>
+<li> Los grupos de pasajeros que sobrevivieron y que perecieron, **no tienen una distribución normal ni homogeneidad de la varianza**, salvo en el caso de **Parch**.</li>
+<li> Casi el **70% de las mujeres** que viajaban en el barco **sobrevivieron**, lo que es casi el doble que el porcentaje de hombres.</li>
+<li> El **porcentaje de supervivencia es mucho más alto en pasajeros de primera y segunda clase**, que en los de tercera. Esta afirmación se confirma con el análisis de Fare, que la distribución del precio del billete es más elevada en el caso de los supervivientes. Igual conclusión se obtiene del análisis por puerto de embarque donde el puerto con mayor tasa de supervivencia está directamente relacionado con la clase de los pasajeros que subieron en ese puerto.</li>
+<li> El análisis de regresión determina la **clase** y el **género** como las variables más indicadas para predecir el análisis de la supervivencia.</li>
+<li> No hemos encontrado **correlación** entre las variables numéricas del dataset.</li>
+</ul>
+
+Del análisis supervisado de minería de datos se han obtenido cuatro reglas para predecir la supervivencia con casi un 80% de precisión:
+<ul>
+<li>Los hombres de 3 clase, mueren con una probabilidad del 85%.</li>
+<li>Un adulto de 3 clase muere con una probabilidad del 83%.</li>
+<li>Un niño de 1 o 2 clase sobrevive con una probabilidad del 90%.</li>
+<li>Una mujer de 1 clase sobrevive con una probabilidad del 75%.</li>
+</ul>
+
+Podemos hacer un contraste entre las reglas obtenidas por los métodos anteriores y la famosa frase que ha pasado a la historia de *las mujeres y los niños primero*. Con este análisis, se puede demostrar que el objetivo de garantizar la supervivencia de mujeres y niños se cumplió sólo en parte, dado que del análisis se concluye que definitivamente la clase fue una variable importante también.
+
+
+## Código: Hay que adjuntar el código, preferiblemente en R, con el que se ha realizado la limpieza, análisis y representación de los datos. Si lo preferís, también podéis trabajar en Python.
+Todo el código utilizado para completar la práctica está incluído en este documento.
+
+```{r}
+write.csv(training, "~/Downloads/titanic/training_processed.csv", row.names = FALSE)
+```
+
+
+
